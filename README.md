@@ -1,6 +1,6 @@
 # German RAG Assistant
 
-A retrieval-augmented generation (RAG) system that answers questions about **German university documents** (study and examination regulations of the University of Passau). It runs **fully locally**: embeddings, reranker and LLM all run on your own machine, so no documents leave it.
+A retrieval-augmented generation (RAG) system that answers questions about **German university documents** (study and examination regulations of the University of Passau). All models (embeddings, reranker and LLM) run **locally**; the vectors are stored in **PostgreSQL + pgvector** (Supabase, Frankfurt region).
 
 Every answer is in German and cites its sources (file + page). Questions outside the documents get "Dazu habe ich keine Informationen in meinen Dokumenten." instead of a made-up answer.
 
@@ -18,6 +18,8 @@ It comes in two versions:
 | + removed table-of-contents chunks | 80% |
 | + hybrid search (BM25 + vector) | 88% |
 | **+ cross-encoder reranking** | **92%** |
+
+Migrating the vector store from Chroma to PostgreSQL + pgvector gave identical hit rates.
 
 **Agent vs simple pipeline** – 5 hard questions, answers checked by hand:
 
@@ -39,13 +41,13 @@ flowchart LR
     A[German PDFs] --> B[Load pages<br/>+ file/page metadata]
     B --> C[Chunk<br/>800 chars, remove TOC]
     C --> D[Embeddings<br/>qwen3-embedding]
-    D --> E[(Chroma<br/>cosine)]
+    D --> E[(PostgreSQL + pgvector<br/>HNSW, cosine)]
     C --> F[BM25 index]
 ```
 
 1. **Load:** PDFs are read page by page; each page keeps its file name and page number.
 2. **Chunk:** pages are split into ~800-character chunks with overlap; table-of-contents chunks are filtered out.
-3. **Index:** chunks are embedded locally and stored in Chroma (cosine distance); a BM25 keyword index is built with a German tokenizer.
+3. **Index:** chunks are embedded locally and stored in PostgreSQL with pgvector (HNSW index, cosine distance); a BM25 keyword index is built in memory with a German tokenizer.
 
 ### Retrieval (both versions)
 
@@ -88,7 +90,7 @@ All steps are traced with **LangSmith**.
 | Framework | LangChain, LangGraph |
 | PDF loading | PyPDFLoader |
 | Embeddings | `qwen3-embedding:0.6b` via Ollama |
-| Vector DB | Chroma |
+| Vector DB | PostgreSQL + pgvector (Supabase, Frankfurt) via `langchain-postgres` |
 | Keyword search | BM25 (`rank-bm25`) |
 | Reranker | `BAAI/bge-reranker-v2-m3` (sentence-transformers) |
 | LLM | `qwen3.5:4b` via Ollama |
@@ -103,7 +105,7 @@ RAG/
 ├── src/
 │   ├── load.py      # load PDFs with file/page metadata
 │   ├── chunk.py     # split into chunks, remove TOC chunks
-│   ├── vectordb.py  # embeddings + Chroma (build / load)
+│   ├── vectordb.py  # embeddings + PGVector (build / load)
 │   ├── hybrid.py    # BM25 + vector hybrid retriever
 │   ├── rerank.py    # cross-encoder reranking
 │   ├── answer.py    # simple RAG pipeline
@@ -117,31 +119,54 @@ RAG/
 
 ## Setup
 
-Requirements: Python 3.12, [uv](https://docs.astral.sh/uv/), [Ollama](https://ollama.com). An NVIDIA GPU is optional (speeds up reranking).
+Requirements: Python 3.12, [uv](https://docs.astral.sh/uv/), [Ollama](https://ollama.com), a [Supabase](https://supabase.com) project (free tier). An NVIDIA GPU is optional (speeds up reranking).
+
+**1. Clone and install**
 
 ```bash
-# 1. Clone and install
 git clone https://github.com/pratham636/german-rag-assistant.git
 cd german-rag-assistant
 uv sync
-
-# 2. Download the local models
-ollama pull qwen3-embedding:0.6b
-ollama pull qwen3.5:4b
-
-# 3. Put your PDFs into data/
-
-# 4. Build the vector database (first run only)
-uv run src/vectordb.py
 ```
 
-Optional, for LangSmith tracing, create a `.env` file:
+**2. Download the local models**
+
+```bash
+ollama pull qwen3-embedding:0.6b
+ollama pull qwen3.5:4b
+```
+
+**3. Set up the database**
+
+- Create a Supabase project and enable the `vector` extension (Database → Extensions).
+- Copy the **Session pooler** connection string (Connect button) and create a `.env` file:
 
 ```text
+DATABASE_URL=postgresql+psycopg://postgres.<project>:<password>@aws-0-eu-central-1.pooler.supabase.com:5432/postgres
+
+# optional: LangSmith tracing
 LANGSMITH_TRACING=true
 LANGSMITH_API_KEY=your_key
 LANGSMITH_PROJECT=german-rag-assistant
 ```
+
+**4. Put your PDFs into `data/` and build the index**
+
+```bash
+uv run src/vectordb.py --build
+```
+
+**5. Add the index and lock the tables** (Supabase → SQL Editor)
+
+```sql
+create index if not exists embedding_hnsw_idx
+on langchain_pg_embedding using hnsw (embedding vector_cosine_ops);
+
+alter table langchain_pg_collection enable row level security;
+alter table langchain_pg_embedding enable row level security;
+```
+
+Row Level Security blocks access through Supabase's public web API; the Python code connects directly to Postgres and is not affected.
 
 ## Usage
 
@@ -169,7 +194,7 @@ uv run src/debug.py     # retrieval evaluation
 uv run src/compare.py   # simple pipeline vs agent
 ```
 
-After changing the PDFs, chunk size or embedding model, delete `chroma_db/` and rebuild.
+After changing the PDFs, chunk size or embedding model, rebuild with `uv run src/vectordb.py --build`.
 
 ## Limitations
 
@@ -177,12 +202,12 @@ After changing the PDFs, chunk size or embedding model, delete `chroma_db/` and 
 - **Weak grader:** the 4B model as relevance judge is inconsistent (sometimes too lenient, sometimes too strict); the fallback limits the damage.
 - **Legal structure:** § numbers and their titles can end up in different chunks, so questions like "Was regelt § 4?" are hard.
 - **Evaluation:** retrieval is measured automatically; answer quality is so far checked by hand.
-- **LangSmith** is a cloud service; turn tracing off for a fully local setup.
+- **Cloud services:** the chunks are stored in Supabase and traces are sent to LangSmith. For a fully local setup, run Postgres + pgvector in Docker and turn tracing off.
 
 ## Next steps
 
-- Answer evaluation with RAGAS
-- PGVector instead of Chroma
 - Security layer (prompt-injection filter)
 - FastAPI endpoint + Docker
+- Answer evaluation with RAGAS
+- Metadata filters (search only within one study programme)
 - § numbers as chunk metadata
