@@ -13,8 +13,8 @@ from config import (TOP_K, SCORE_THRESHOLD, MAX_CONTEXT_TOKENS, NO_INFO,
 
 db = load_db()
 retriever = get_hybrid_retriever(db, k=TOP_K)
-llm = ChatOllama(model="qwen3.5:4b", temperature=0, reasoning=False)
-tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3.5-4B")   
+llm = ChatOllama(model=LLM_MODEL, temperature=0, reasoning=False)
+tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_MODEL)   
 
 PROMPT = ChatPromptTemplate.from_template(
     """Beantworte die Frage NUR mit dem Kontext. Wenn die Antwort fehlt, sag: "{no_info}"

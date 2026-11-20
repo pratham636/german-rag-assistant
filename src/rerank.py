@@ -1,12 +1,12 @@
 from sentence_transformers import CrossEncoder
 from langchain_core.runnables import RunnableLambda
 import torch
-
+from config import RERANK_MODEL, RERANK_TOP_N
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-reranker = CrossEncoder("BAAI/bge-reranker-v2-m3", device=device)   # multilingual, good for German
+reranker = CrossEncoder(RERANK_MODEL, device=device)   # multilingual, good for German
 
-def rerank(question, docs, top_n=4):
+def rerank(question, docs, top_n=RERANK_TOP_N):
     if not docs:
         return []
     scores = reranker.predict([(question, d.page_content) for d in docs],show_progress_bar=False)
