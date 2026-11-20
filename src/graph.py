@@ -31,8 +31,6 @@ def security_check(state: RAGState):
 def blocked(state: RAGState):
     return {"answer": BLOCKED_MSG, "sources": []}
 
-def route_security(state: RAGState):
-    return "blocked" if state["blocked"] else "check_topic"
 
 
 def check_topic(state: RAGState):
@@ -102,6 +100,9 @@ def generate(state: RAGState):
     return {"answer": answer, "sources": sources}
 
 # ---------- Routing ----------
+def route_security(state: RAGState):
+    return "blocked" if state["blocked"] else "check_topic"
+
 def route_topic(state: RAGState):
     return "retrieve" if state["on_topic"] else "no_info"
 
