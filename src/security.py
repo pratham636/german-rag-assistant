@@ -15,8 +15,13 @@ INJECTION_PATTERNS = [
     r"jailbreak",
     r"developer\s+mode",
     r"<\s*/?\s*(system|script)",
+    r"vergiss\w*\b.*\b(gesagt|vorher|anweisung|regel)",
+    r"\bdein\w*\s+(anweisung|regel|instruktion|prompt)",
 ]
+LEET = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "@": "a", "$": "s"})
 
+def normalize(text: str) -> str:
+    return text.lower().translate(LEET)
 PII_PATTERNS = {
     "EMAIL": r"[\w.+-]+@[\w-]+\.[\w.]+",
     "PHONE": r"\+?\d[\d\s/-]{7,}\d",
@@ -32,8 +37,9 @@ def check_input(question: str):
     if len(q) > MAX_LEN:
         return False, q, "too_long"
 
+    norm = normalize(q)
     for pattern in INJECTION_PATTERNS:
-        if re.search(pattern, q, re.IGNORECASE):
+        if re.search(pattern, norm, re.IGNORECASE):
             return False, q, "prompt_injection"
 
     for label, pattern in PII_PATTERNS.items():
