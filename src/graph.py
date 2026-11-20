@@ -3,8 +3,8 @@ from langchain_core.documents import Document
 from langgraph.graph import StateGraph, START, END
 from answer import (db, retriever, chain, llm, count_tokens, rerank,
                     SCORE_THRESHOLD, MAX_CONTEXT_TOKENS, NO_INFO, TOKEN_OVER)
-
-MAX_RETRIES = 2
+from config import MAX_RETRIES
+from logger import log
 
 # ---------- State ----------
 class RAGState(TypedDict):
@@ -36,7 +36,7 @@ def retrieve(state: RAGState):
             break
         selected.append(d)
         total += n
-    print(f"   [retrieve] query: {q} -> {len(selected)} chunks")
+    log.info("retrieve | chunks=%d | query=%s", len(selected), q)
     update = {"docs": selected}
     if state.get("retries", 0) == 0:      # only save candidates from the first search
         update["candidates"] = selected
@@ -54,7 +54,7 @@ def grade_docs(state: RAGState):
         verdict = llm.invoke(prompt).content.strip().lower()
         if verdict.startswith("ja"):
             relevant.append(d)
-    print(f"   [grade] {len(relevant)}/{len(state['docs'])} chunks relevant")
+    log.info("grade | %d/%d relevant", len(relevant), len(state["docs"]))
     return {"docs": relevant}
 
 def rewrite_question(state: RAGState):
@@ -66,10 +66,10 @@ def rewrite_question(state: RAGState):
         "aus deutschen Studien- und Prüfungsordnungen. Gib nur die Suchanfrage aus."
     )
     new_query = llm.invoke(prompt).content.strip()
-    print(f"   [rewrite] {new_query}")
+    log.info("rewrite | %s", new_query)
     return {"search_query": new_query, "retries": state["retries"] + 1}
 def fallback(state: RAGState):
-    print("   [fallback] no chunk passed grading -> using top reranked chunks")
+    log.info("fallback | using first-search candidates")
     return {"docs": state["candidates"]}
 
 def generate(state: RAGState):

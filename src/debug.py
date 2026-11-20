@@ -3,6 +3,8 @@ from hybrid import get_hybrid_retriever
 from tests import TESTS, OUT_OF_SCOPE
 from rerank import get_rerank_retriever
 K = 4
+from config import TOP_K
+
 
 def is_found(expected, docs):
     exp = expected if isinstance(expected, list) else [expected]
@@ -39,13 +41,12 @@ def check_threshold(db):
 if __name__ == "__main__":
     db = load_db()
     vector = db.as_retriever(search_kwargs={"k": K})
-    hybrid = get_hybrid_retriever(db, k=K)
+    hybrid = get_hybrid_retriever(db, k=TOP_K)          # one hybrid, k=5 from config
+    reranked = get_rerank_retriever(hybrid)             # rerank on top of it
 
     v_misses = hit_rate(vector, "VECTOR")
     h_misses = hit_rate(hybrid, "HYBRID")
+    r_misses = hit_rate(reranked, "HYBRID + RERANK")    # now really reranked
 
-    reranked = get_rerank_retriever(get_hybrid_retriever(db, k=5))
-    r_misses = hit_rate(reranked, "HYBRID + RERANK")
-    
-    show_misses(h_misses, "HYBRID")
+    show_misses(r_misses, "HYBRID + RERANK")            # show what still fails at the end
     check_threshold(db)

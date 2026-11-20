@@ -8,11 +8,8 @@ from vectordb import load_db
 from hybrid import get_hybrid_retriever
 from transformers import AutoTokenizer          
 from rerank import rerank
-TOP_K = 5
-SCORE_THRESHOLD = 0.35
-MAX_CONTEXT_TOKENS = 3000
-NO_INFO = "Dazu habe ich keine Informationen in meinen Dokumenten."
-TOKEN_OVER = "Token-Limit überschritten: der Kontext ist zu groß für das Budget."
+from config import (TOP_K, SCORE_THRESHOLD, MAX_CONTEXT_TOKENS, NO_INFO,
+                    TOKEN_OVER, LLM_MODEL, TOKENIZER_MODEL)
 
 db = load_db()
 retriever = get_hybrid_retriever(db, k=TOP_K)

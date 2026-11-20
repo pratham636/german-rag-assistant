@@ -9,7 +9,7 @@ reranker = CrossEncoder("BAAI/bge-reranker-v2-m3", device=device)   # multilingu
 def rerank(question, docs, top_n=4):
     if not docs:
         return []
-    scores = reranker.predict([(question, d.page_content) for d in docs])
+    scores = reranker.predict([(question, d.page_content) for d in docs],show_progress_bar=False)
     ranked = sorted(zip(docs, scores), key=lambda x: x[1], reverse=True)
     return [d for d, _ in ranked[:top_n]]
 

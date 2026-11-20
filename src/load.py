@@ -1,6 +1,6 @@
 from pathlib import Path
 from langchain_community.document_loaders import PyPDFLoader
-
+from config import DATA_DIR
 BASE_DIR = Path(__file__).parent.parent   # src/ -> RAG/
 DATA_DIR = BASE_DIR / "data"
 

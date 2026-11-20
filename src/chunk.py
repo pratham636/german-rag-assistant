@@ -1,6 +1,6 @@
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from load import load_pdfs
-
+from config import CHUNK_SIZE, CHUNK_OVERLAP
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 150
 

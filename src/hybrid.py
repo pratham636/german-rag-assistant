@@ -3,6 +3,8 @@ from langchain_core.documents import Document
 from langchain_community.retrievers import BM25Retriever
 from langchain_classic.retrievers import EnsembleRetriever
 from vectordb import load_db
+from load import load_pdfs
+from chunk import split_docs
 
 K = 4
 
@@ -11,9 +13,7 @@ def german_tokenize(text):
     return re.findall(r"§|\w+", text.lower())
 
 def get_all_chunks(db):
-    data = db.get()
-    return [Document(page_content=t, metadata=m)
-            for t, m in zip(data["documents"], data["metadatas"])]
+    return split_docs(load_pdfs())
 
 def get_hybrid_retriever(db, k=K, weights=(0.5, 0.5)):
     chunks = get_all_chunks(db)
