@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { name = "Pratham", email = "prathamshah082@gmail.com" }
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "click>=8.5.1",
     "fastapi>=0.165.0",
@@ -24,9 +24,11 @@ dependencies = [
     "psycopg[binary]>=3.3.9",
     "pypdf>=7.1.0",
     "python-dotenv>=1.2.4",
+    "ragas>=0.4.4",
     "rank-bm25>=0.2.2",
     "sentence-transformers>=6.3.0",
     "tiktoken>=0.14.0",
+    "torch>=2.14.0",
     "uvicorn>=0.54.0",
 ]
 
@@ -44,3 +46,11 @@ package = false
 dev = [
     "pytest>=9.2.0",
 ]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu130" }]

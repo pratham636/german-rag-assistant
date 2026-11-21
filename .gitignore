@@ -10,8 +10,11 @@ wheels/
 .venv
 
 
-
 .venv/
 .env
-chroma_db/
+.git/
 __pycache__/
+.pytest_cache/
+chroma_db/
+tests/
+results.md

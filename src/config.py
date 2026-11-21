@@ -3,7 +3,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
-
+import torch
+RERANK_DEVICE = os.getenv("RERANK_DEVICE") or ("cuda" if torch.cuda.is_available() else "cpu")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 RERANK_DEVICE = os.getenv("RERANK_DEVICE", "cuda")
 

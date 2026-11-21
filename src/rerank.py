@@ -20,6 +20,14 @@ def get_rerank_retriever(base_retriever, top_n=4):
     """Hybrid -> rerank, usable like a normal retriever (.invoke)."""
     return RunnableLambda(lambda q: rerank(q, base_retriever.invoke(q), top_n))
 
+def rerank_with_scores(question, docs, top_n=4):
+    if not docs:
+        return []
+    scores = reranker.predict([(question, d.page_content) for d in docs],
+                              show_progress_bar=False)
+    ranked = sorted(zip(docs, scores), key=lambda x: x[1], reverse=True)
+    return ranked[:top_n]
+
 if __name__ == "__main__":
     from vectordb import load_db
     from hybrid import get_hybrid_retriever

@@ -1,38 +1,30 @@
 # German RAG Assistant
 
-A retrieval-augmented generation (RAG) system that answers questions about **German university documents** (study and examination regulations of the University of Passau). All models (embeddings, reranker and LLM) run **locally**; the vectors are stored in **PostgreSQL + pgvector** (Supabase, Frankfurt region).
+A retrieval-augmented generation (RAG) system that answers questions about **German university documents** (study and examination regulations of the University of Passau). All models (embeddings, reranker and LLM) run **locally**; vectors are stored in **PostgreSQL + pgvector**.
 
-Every answer is in German and cites its sources (file + page). Questions outside the documents get "Dazu habe ich keine Informationen in meinen Dokumenten." instead of a made-up answer.
+Answers are in German and cite their sources (file + page). If the documents don't contain the answer, the system says "Dazu habe ich keine Informationen in meinen Dokumenten." instead of making one up.
 
-It comes in two versions:
-- **Simple pipeline** (`answer.py`): hybrid search → reranking → LLM
-- **Self-correcting agent** (`graph.py`, LangGraph): grades the retrieved chunks, rewrites the question if nothing relevant is found, and falls back safely
+- **Self-correcting agent** (LangGraph): grades retrieved chunks, rewrites the query if nothing relevant is found, falls back only when confident
+- **Hybrid search + reranking:** BM25 + vector search, cross-encoder reranking
+- **Security layer:** prompt-injection filter, PII masking, output check
+- **Production setup:** FastAPI, Docker, structured logging, LangSmith tracing
+- **Evaluated:** retrieval hit rate, RAGAS answer quality, real user questions, security tests
 
 ## Results
 
-**Retrieval** – 25-question test set (German + English), hit rate = correct chunk among the top 4:
-
-| Version | Hit rate |
+| What | Result |
 | --- | --- |
-| Vector search only (baseline) | 76% |
-| + removed table-of-contents chunks | 80% |
-| + hybrid search (BM25 + vector) | 88% |
-| **+ cross-encoder reranking** | **92%** |
+| Retrieval hit rate, 40 synthetic questions (vector → hybrid + rerank) | **58% → 73%** |
+| Real student questions, answerable (retrieval) | 5/8 |
+| Real student questions, not covered by the documents (honest "no info") | **7/7** |
+| RAGAS answer relevancy, agent vs simple pipeline (8B judge, 65 questions) | **0.60 vs 0.53** |
+| Security tests | 22 passed, 2 documented limitations |
 
-Migrating the vector store from Chroma to PostgreSQL + pgvector gave identical hit rates.
+Main remaining failure: **programme confusion**. Questions about a small regulation (8 pages) retrieve a large module catalogue (138 pages) instead.
 
-**Agent vs simple pipeline** – 5 hard questions, answers checked by hand:
+Full numbers, failure analysis and design decisions: **[results.md](results.md)**
 
-| | Result |
-| --- | --- |
-| Agent better | 2 (fixed a wrong rule and a wrong date) |
-| Equal | 3 |
-| Agent worse | 0 |
-| Extra time | ~1–2 s, ~15–20 s when rewrites are needed |
-
-Details, remaining misses and debugging findings: [results.md](results.md)
-
-## How it works
+## Architecture
 
 ### Indexing
 
@@ -45,118 +37,109 @@ flowchart LR
     C --> F[BM25 index]
 ```
 
-1. **Load:** PDFs are read page by page; each page keeps its file name and page number.
-2. **Chunk:** pages are split into ~800-character chunks with overlap; table-of-contents chunks are filtered out.
-3. **Index:** chunks are embedded locally and stored in PostgreSQL with pgvector (HNSW index, cosine distance); a BM25 keyword index is built in memory with a German tokenizer.
-
-### Retrieval (both versions)
-
-- **Hybrid search:** BM25 (exact words like names, dates, § numbers) and vector search (meaning) are merged with Reciprocal Rank Fusion.
-- **Rerank:** a multilingual cross-encoder re-scores the candidates and keeps the best 4.
-- **Token budget:** chunks are added until the context limit (counted with the Qwen tokenizer).
-
-### Self-correcting agent (LangGraph)
+### Question answering (LangGraph agent)
 
 ```mermaid
 flowchart TD
-    S([Start]) --> T{check_topic<br/>score ≥ 0.35?}
+    S([Question]) --> SC{security_check}
+    SC -- injection / empty --> B[blocked]
+    SC -- ok, PII masked --> T{check_topic<br/>score ≥ 0.35?}
     T -- no --> N[no_info]
-    T -- yes --> R[retrieve<br/>hybrid + rerank]
+    T -- yes --> R[retrieve<br/>hybrid + rerank + token budget]
     R --> G{grade_docs<br/>LLM: relevant?}
-    G -- some relevant --> GEN[generate]
+    G -- some relevant --> GEN[generate<br/>+ output check]
     G -- none, retries < 2 --> RW[rewrite_question]
     RW --> R
-    G -- none, after 2 retries --> F[fallback<br/>first-search chunks]
-    F --> GEN
-    GEN --> E([End])
+    G -- none, after 2 retries --> F{fallback<br/>reranker score ≥ 0.3?}
+    F -- yes --> GEN
+    F -- no --> N
+    GEN --> E([Answer + sources])
     N --> E
+    B --> E
 ```
 
 | Node | What it does |
 | --- | --- |
+| `security_check` | Blocks prompt injection and empty/too-long input, masks e-mail, phone and IBAN |
 | `check_topic` | Blocks off-topic questions before any LLM call |
-| `retrieve` | Hybrid search + reranking + token budget |
-| `grade_docs` | The LLM checks each chunk ("ja/nein") and drops irrelevant ones |
-| `rewrite_question` | Rephrases the search query with legal terms, using the failed query as input |
-| `fallback` | If the grader rejects everything, uses the reranked chunks from the first search |
-| `generate` | Answers in German with sources, or says "no info" if the answer is missing |
-
-All steps are traced with **LangSmith**.
+| `retrieve` | Hybrid search (BM25 + vector, Reciprocal Rank Fusion) → cross-encoder rerank → token budget |
+| `grade_docs` | The LLM checks each chunk and drops irrelevant ones |
+| `rewrite_question` | Rephrases the search query, using the failed query as input |
+| `fallback` | Uses first-search chunks only if the reranker is confident, otherwise "no info" |
+| `generate` | Answers in German with sources; the output check blocks prompt leaks |
 
 ## Tech stack
 
 | Part | Tool |
 | --- | --- |
 | Framework | LangChain, LangGraph |
-| PDF loading | PyPDFLoader |
 | Embeddings | `qwen3-embedding:0.6b` via Ollama |
-| Vector DB | PostgreSQL + pgvector (Supabase, Frankfurt) via `langchain-postgres` |
+| Vector DB | PostgreSQL + pgvector (Supabase) via `langchain-postgres` |
 | Keyword search | BM25 (`rank-bm25`) |
 | Reranker | `BAAI/bge-reranker-v2-m3` (sentence-transformers) |
 | LLM | `qwen3.5:4b` via Ollama |
-| Observability | LangSmith |
+| API | FastAPI + Uvicorn |
+| Deployment | Docker |
+| Evaluation | custom hit-rate scripts, RAGAS, pytest |
+| Observability | LangSmith, Python logging |
 | Package manager | uv |
 
 ## Project structure
 
 ```text
 RAG/
-├── data/            # German PDFs
+├── data/                  # German PDFs
 ├── src/
-│   ├── load.py      # load PDFs with file/page metadata
-│   ├── chunk.py     # split into chunks, remove TOC chunks
-│   ├── vectordb.py  # embeddings + PGVector (build / load)
-│   ├── hybrid.py    # BM25 + vector hybrid retriever
-│   ├── rerank.py    # cross-encoder reranking
-│   ├── answer.py    # simple RAG pipeline
-│   ├── graph.py     # self-correcting LangGraph agent
-│   ├── tests.py     # 25 test questions + off-topic questions
-│   ├── debug.py     # retrieval hit rate: vector vs hybrid vs rerank
-│   └── compare.py   # simple pipeline vs agent (answers + time)
-├── results.md       # evaluation results and findings
+│   ├── config.py          # all settings in one place
+│   ├── logger.py          # logging setup
+│   ├── load.py            # load PDFs with file/page metadata
+│   ├── chunk.py           # split into chunks, remove TOC chunks
+│   ├── vectordb.py        # embeddings + PGVector (build / load)
+│   ├── hybrid.py          # BM25 + vector hybrid retriever
+│   ├── rerank.py          # cross-encoder reranking
+│   ├── security.py        # injection filter, PII masking, output check
+│   ├── answer.py          # simple RAG pipeline
+│   ├── graph.py           # LangGraph agent
+│   ├── api.py             # FastAPI: /health, /ask
+│   ├── tests.py           # test questions (synthetic + real)
+│   ├── debug.py           # retrieval hit rate: vector vs hybrid vs rerank
+│   ├── eval_real.py       # real user questions: retrieval + honesty
+│   └── evaluate_ragas.py  # RAGAS: simple pipeline vs agent
+├── tests/
+│   └── test_security.py   # pytest security tests
+├── Dockerfile
+├── .env.example
+├── results.md             # all evaluation results and findings
 └── pyproject.toml
 ```
 
 ## Setup
 
-Requirements: Python 3.12, [uv](https://docs.astral.sh/uv/), [Ollama](https://ollama.com), a [Supabase](https://supabase.com) project (free tier). An NVIDIA GPU is optional (speeds up reranking).
+Requirements: Python 3.12, [uv](https://docs.astral.sh/uv/), [Ollama](https://ollama.com), a [Supabase](https://supabase.com) project (free tier). An NVIDIA GPU is optional.
 
-**1. Clone and install**
+**1. Install**
 
 ```bash
 git clone https://github.com/pratham636/german-rag-assistant.git
 cd german-rag-assistant
 uv sync
-```
-
-**2. Download the local models**
-
-```bash
 ollama pull qwen3-embedding:0.6b
 ollama pull qwen3.5:4b
 ```
 
-**3. Set up the database**
-
-- Create a Supabase project and enable the `vector` extension (Database → Extensions).
-- Copy the **Session pooler** connection string (Connect button) and create a `.env` file:
+**2. Database:** create a Supabase project, enable the `vector` extension, and copy the **Session pooler** connection string into `.env` (see `.env.example`):
 
 ```text
 DATABASE_URL=postgresql+psycopg://postgres.<project>:<password>@aws-0-eu-central-1.pooler.supabase.com:5432/postgres
-
-# optional: LangSmith tracing
-LANGSMITH_TRACING=true
-LANGSMITH_API_KEY=your_key
-LANGSMITH_PROJECT=german-rag-assistant
 ```
 
-**4. Put your PDFs into `data/` and build the index**
+**3. Build the index** (PDFs in `data/`):
 
 ```bash
 uv run src/vectordb.py --build
 ```
 
-**5. Add the index and lock the tables** (Supabase → SQL Editor)
+**4. Index and security** (Supabase → SQL Editor):
 
 ```sql
 create index if not exists embedding_hnsw_idx
@@ -166,48 +149,62 @@ alter table langchain_pg_collection enable row level security;
 alter table langchain_pg_embedding enable row level security;
 ```
 
-Row Level Security blocks access through Supabase's public web API; the Python code connects directly to Postgres and is not affected.
-
 ## Usage
 
-Ask questions with the agent:
+**API**
 
 ```bash
-uv run src/graph.py
+uv run uvicorn api:api --app-dir src --port 8000
 ```
 
-Example:
+Open http://127.0.0.1:8000/docs and try `POST /ask`:
 
-```text
-=== Was passiert, wenn man eine Frist aus Gründen nicht einhalten kann, die man nicht zu vertreten hat?
-   [retrieve] -> 4 chunks
-   [grade] 1/4 chunks relevant
-A: In diesem Fall wird eine Nachfrist gewährt [1].
-   [1] LL.B._Legal_Tech.pdf S.19
+```json
+{ "question": "Bis wann kann man von Prüfungen zurücktreten?" }
 ```
 
-Other scripts:
+```json
+{
+  "answer": "Bis zum 11. Januar 2027 [1].",
+  "sources": ["[1] Bekanntmachung_Präsenzprüfungen_WiSe.pdf S.1"],
+  "blocked": false,
+  "latency_s": 5.4
+}
+```
+
+**Docker** (Ollama runs on the host):
 
 ```bash
-uv run src/answer.py    # simple pipeline
-uv run src/debug.py     # retrieval evaluation
-uv run src/compare.py   # simple pipeline vs agent
+docker build -t german-rag .
+docker run -p 8000:8000 --env-file .env -v hf-cache:/root/.cache/huggingface german-rag
 ```
 
-After changing the PDFs, chunk size or embedding model, rebuild with `uv run src/vectordb.py --build`.
+**Evaluation**
+
+```bash
+uv run pytest -v                 # security tests
+uv run src/debug.py              # retrieval hit rate
+uv run src/eval_real.py          # real user questions
+uv run src/evaluate_ragas.py     # RAGAS (slow)
+```
+
+## Design decisions
+
+- **Honesty over coverage:** the fallback only answers when the reranker is confident. This removed all invented answers on real unanswerable questions (5/7 → 7/7), at the cost of one answerable question.
+- **Reranker on CPU, LLM on GPU:** on an 8 GB laptop GPU, PyTorch and Ollama conflicted; the LLM is the bottleneck, so it gets the GPU.
+- **Local models:** no API limits, no cost, documents stay on the machine (except the vector store and optional tracing).
 
 ## Limitations
 
-- **Small local LLM:** the 4B model sometimes mixes up items in list-structured documents even when retrieval is correct (see [results.md](results.md)).
-- **Weak grader:** the 4B model as relevance judge is inconsistent (sometimes too lenient, sometimes too strict); the fallback limits the damage.
-- **Legal structure:** § numbers and their titles can end up in different chunks, so questions like "Was regelt § 4?" are hard.
-- **Evaluation:** retrieval is measured automatically; answer quality is so far checked by hand.
-- **Cloud services:** the chunks are stored in Supabase and traces are sent to LangSmith. For a fully local setup, run Postgres + pgvector in Docker and turn tracing off.
+- **Small LLM:** the 4B model sometimes mixes up items in list-structured documents, and is an inconsistent relevance grader.
+- **Programme confusion:** similar regulations from different study programmes get mixed up.
+- **Evaluation:** test sets are small; RAGAS uses a local 8B judge, so scores are indicative.
+- **Security:** rule-based filters can be bypassed with creative rephrasing.
+- **Cloud parts:** vectors are stored in Supabase and traces go to LangSmith. For a fully local setup, run Postgres + pgvector in Docker and turn tracing off.
 
 ## Next steps
 
-- Security layer (prompt-injection filter)
-- FastAPI endpoint + Docker
-- Answer evaluation with RAGAS
-- Metadata filters (search only within one study programme)
-- § numbers as chunk metadata
+- Metadata filter by study programme
+- Contextual retrieval (prefix chunks with document and § context)
+- Route only low-confidence questions through the agent
+- LLM-based prompt-injection classifier

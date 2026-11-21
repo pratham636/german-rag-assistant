@@ -23,6 +23,7 @@ def get_db(fresh=False):
         use_jsonb=True,
         embedding_length=1024,
         pre_delete_collection=fresh,
+        engine_args={"pool_pre_ping": True, "pool_recycle": 300},
     )
 
 def build_db(chunks, batch_size=100):
