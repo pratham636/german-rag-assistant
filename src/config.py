@@ -4,6 +4,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+RERANK_DEVICE = os.getenv("RERANK_DEVICE", "cuda")
+
 # Paths
 BASE_DIR = Path(__file__).parent.parent
 DATA_DIR = BASE_DIR / "data"

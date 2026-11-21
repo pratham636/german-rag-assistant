@@ -2,9 +2,12 @@ from sentence_transformers import CrossEncoder
 from langchain_core.runnables import RunnableLambda
 import torch
 from config import RERANK_MODEL, RERANK_TOP_N
+from config import RERANK_MODEL, RERANK_TOP_N, RERANK_DEVICE
+reranker = CrossEncoder(RERANK_MODEL, device=RERANK_DEVICE)
+
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-reranker = CrossEncoder(RERANK_MODEL, device=device)   # multilingual, good for German
+# reranker = CrossEncoder(RERANK_MODEL, device=device)   # multilingual, good for German
 
 def rerank(question, docs, top_n=RERANK_TOP_N):
     if not docs:

@@ -10,10 +10,13 @@ from transformers import AutoTokenizer
 from rerank import rerank
 from config import (TOP_K, SCORE_THRESHOLD, MAX_CONTEXT_TOKENS, NO_INFO,
                     TOKEN_OVER, LLM_MODEL, TOKENIZER_MODEL)
+from config import OLLAMA_BASE_URL
 
 db = load_db()
 retriever = get_hybrid_retriever(db, k=TOP_K)
-llm = ChatOllama(model=LLM_MODEL, temperature=0, reasoning=False)
+llm = ChatOllama(model=LLM_MODEL, temperature=0, reasoning=False,
+                 base_url=OLLAMA_BASE_URL)
+# llm = ChatOllama(model=LLM_MODEL, temperature=0, reasoning=False)
 tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_MODEL)   
 
 PROMPT = ChatPromptTemplate.from_template(

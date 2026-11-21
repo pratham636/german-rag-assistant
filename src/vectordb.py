@@ -8,10 +8,12 @@ from chunk import split_docs
 from config import DATABASE_URL, COLLECTION, EMBED_MODEL, EMBED_DIM
 
 load_dotenv()
+from config import OLLAMA_BASE_URL
+embeddings = OllamaEmbeddings(model=EMBED_MODEL, base_url=OLLAMA_BASE_URL)
 
 CONNECTION = os.getenv("DATABASE_URL")
 COLLECTION = "german_rag"
-embeddings = OllamaEmbeddings(model="qwen3-embedding:0.6b")
+# embeddings = OllamaEmbeddings(model="qwen3-embedding:0.6b")
 
 def get_db(fresh=False):
     return PGVector(
